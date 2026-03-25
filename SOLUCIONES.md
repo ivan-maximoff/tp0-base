@@ -1,5 +1,7 @@
 # Resolución TP0
 
+## Parte 1
+
 ### Ejercicio 1: Generador de Docker Compose
 
 Creación de un script en Bash que utiliza un bucle seq para crear los contenedores dinámicamente.
@@ -29,3 +31,20 @@ chmod +x validar-echo-server.sh
 ### Ejercicio 4: Graceful Shutdown
 
 Implementación de manejadores de señales SIGTERM en ambos lenguajes para asegurar el cierre correcto de recursos antes de finalizar los procesos. En Python se cerró el socket para interrumpir el accept() y en Go se utilizó un select con canales para permitir interrupciones inmediatas.
+
+## Parte 2
+
+### Especificación del Protocolo de Comunicación
+
+Se implementó un protocolo binario basado en frames
+
+1. **Header (5 bytes):**
+   - Opcode (1 byte): Determina la operación.
+   - Payload Length (4 bytes): Tamaño del cuerpo del mensaje.
+
+2. **Tipos de Mensajes (Opcodes):**
+   - 0x01: Mensaje de Apuesta (Bet).
+   - 0x02: Fin de transmisión de Agencia.
+   - 0x03: Consulta de Ganadores.
+   - 0x04: Confirmación (ACK).
+   - 0x05: Error.
