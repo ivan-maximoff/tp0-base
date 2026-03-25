@@ -1,7 +1,9 @@
 import socket
 import logging
 import signal
-
+from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR
+from common.bet import BetDeserializer
+from common.utils import Bet, store_bets
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -9,6 +11,9 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self._handlers = {
+            OPCODE_BET: self.__handle_bet_message
+        }
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
 
@@ -49,16 +54,44 @@ class Server:
         client socket will also be closed
         """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
-            addr = client_sock.getpeername()
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            # TODO: Modify the send to avoid short-writes
-            client_sock.send("{}\n".format(msg).encode('utf-8'))
-        except OSError as e:
-            logging.error("action: receive_message | result: fail | error: {e}")
+            res = Protocol.receive_frame(client_sock)
+            if not res:
+                return
+
+            opcode, body = res
+            handler = self._handlers.get(opcode)
+
+            if handler:
+                handler(client_sock, body)
+            else:
+                logging.error(f"action: receive_frame | result: fail | error: unknown_opcode {opcode}")
+                Protocol.send_frame(client_sock, OPCODE_ERROR, b"Unknown Opcode")
+
+        except Exception as e:
+            logging.error(f"action: handle_client_connection | result: fail | error: {e}")
         finally:
             client_sock.close()
+
+    def __handle_bet_message(self, client_sock, body):
+        """Process a single bet"""
+        try:
+            fields = BetDeserializer.deserialize(body)
+            bet = Bet(
+                agency=fields[0],
+                first_name=fields[1],
+                last_name=fields[2],
+                document=fields[3],
+                birthdate=fields[4],
+                number=fields[5]
+            )
+
+            store_bets([bet])
+            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+            Protocol.send_frame(client_sock, OPCODE_ACK, b"")
+
+        except Exception as e:
+            logging.error(f"action: process_bet | result: fail | error: {e}")
+            Protocol.send_frame(client_sock, OPCODE_ERROR, str(e).encode())
 
     def __accept_new_connection(self):
         """
