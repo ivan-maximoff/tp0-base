@@ -11,6 +11,9 @@ name: tp0
 services:
   server:
     container_name: server
+    build:
+      context: .
+      dockerfile: ./server/Dockerfile
     image: server:latest
     entrypoint: python3 /main.py
     environment:
@@ -26,10 +29,18 @@ for i in $(seq 1 "$CANTIDAD"); do
     cat <<EOF >> "$FILE"
   client$i:
     container_name: client$i
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
     image: client:latest
     entrypoint: /client
     environment:
       - CLI_ID=$i
+      - NOMBRE=Agencia_$i
+      - APELLIDO=Lotería
+      - DOCUMENTO=3090446$i
+      - NACIMIENTO=1999-03-17
+      - NUMERO=7574
     networks:
       - testing_net
     depends_on:
