@@ -1,8 +1,6 @@
 package common
 
 import (
-	"bufio"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -51,6 +49,7 @@ func (c *Client) createClientSocket() error {
 			c.config.ID,
 			err,
 		)
+		return err
 	}
 	c.conn = conn
 	return nil
@@ -59,8 +58,14 @@ func (c *Client) createClientSocket() error {
 // StartClientLoop Send messages to the client until some time threshold is met
 // or a termination signal (SIGTERM) is received.
 func (c *Client) StartClientLoop() {
-	// There is an autoincremental msgID to identify every message sent
-	// Messages if the message amount threshold has not been surpassed
+	bet := Bet{
+        Agency:    os.Getenv("CLI_ID"),
+        Name:      os.Getenv("NOMBRE"),
+        LastName:  os.Getenv("APELLIDO"),
+        ID:        os.Getenv("DOCUMENTO"),
+        BirthDate: os.Getenv("NACIMIENTO"),
+        Number:    os.Getenv("NUMERO"),
+    }
 	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
 		// Check for termination signal before starting a new connection
 		select {
@@ -76,30 +81,30 @@ func (c *Client) StartClientLoop() {
 		}
 
 		// Create the connection the server in every loop iteration. Send an
-		c.createClientSocket()
+		err := c.createClientSocket()
+        if err != nil {
+            log.Errorf("action: connect | result: fail | error: %v", err)
+            time.Sleep(c.config.LoopPeriod)
+            continue
+        }
 
-		// TODO: Modify the send to avoid short-write
-		fmt.Fprintf(
-			c.conn,
-			"[CLIENT %v] Message N°%v\n",
-			c.config.ID,
-			msgID,
-		)
-		msg, err := bufio.NewReader(c.conn).ReadString('\n')
-		c.conn.Close()
+		payload := bet.Serialize()
+		if err := WriteFrame(c.conn, OpcodeBet, payload); err != nil {
+            log.Errorf("action: send_bet | result: fail | error: %v", err)
+            c.conn.Close()
+            return
+        }
 
-		if err != nil {
-			log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
-			return
-		}
+		frame, err := ReadFrame(c.conn)
+        if err != nil {
+            log.Errorf("action: receive_ack | result: fail | error: %v", err)
+        } else if frame.Opcode == OpcodeAck {
+            log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", bet.ID, bet.Number)
+        } else {
+            log.Errorf("action: receive_ack | result: fail | error: received_opcode_%v", frame.Opcode)
+        }
 
-		log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-			c.config.ID,
-			msg,
-		)
+        c.conn.Close()
 
 		// Wait between messages or interrupt immediately if a signal arrives
 		select {
