@@ -24,6 +24,8 @@ class Server:
 
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
+        if os.path.exists("./bets.csv"):
+            os.remove("./bets.csv")
 
     def __handle_signal(self, signum, frame):
         """
