@@ -7,6 +7,8 @@ OPCODE_BATCH = 0x04
 OPCODE_END_DATA = 0x05
 OPCODE_GET_WINNERS = 0x06
 
+HEADER_SIZE = 5
+
 class Protocol:
     @staticmethod
     def send_frame(sock, opcode, body):
@@ -17,7 +19,7 @@ class Protocol:
     @staticmethod
     def receive_frame(sock):
         # 1. Read Header
-        header_raw = Protocol._recv_all(sock, 5)
+        header_raw = Protocol._recv_all(sock, HEADER_SIZE)
         if not header_raw: return None
         
         opcode, length = struct.unpack('>BI', header_raw)

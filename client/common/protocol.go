@@ -13,6 +13,8 @@ const (
 	OpcodeBatch byte = 0x04
 	OpcodeEndData    byte = 0x05
     OpcodeGetWinners byte = 0x06
+
+	HeaderSize int = 5
 )
 
 type Frame struct {
@@ -22,7 +24,7 @@ type Frame struct {
 
 // WriteFrame sends the header (5 bytes) + body over the network
 func WriteFrame(conn net.Conn, opcode byte, body []byte) error {
-	header := make([]byte, 5)
+	header := make([]byte, HeaderSize)
 	header[0] = opcode
 	binary.BigEndian.PutUint32(header[1:], uint32(len(body)))
 	    data := append(header, body...)
@@ -42,9 +44,9 @@ func WriteFrame(conn net.Conn, opcode byte, body []byte) error {
     return nil
 }
 
-// ReadFrame reads exactly 5 bytes for the header, then 'length' bytes for the body
+// ReadFrame reads exactly HeaderSize bytes for the header, then 'length' bytes for the body
 func ReadFrame(conn net.Conn) (*Frame, error) {
-	header := make([]byte, 5)
+	header := make([]byte, HeaderSize)
 	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
 	}
