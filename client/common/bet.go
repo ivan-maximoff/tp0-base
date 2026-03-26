@@ -33,3 +33,14 @@ func (b *Bet) Serialize() []byte {
 
 	return buf
 }
+
+func BetFromCSV(record []string, agencyID string) Bet {
+    return Bet{
+        Agency:    agencyID,
+        Name:      record[0],
+        LastName:  record[1],
+        ID:        record[2],
+        BirthDate: record[3],
+        Number:    record[4],
+    }
+}

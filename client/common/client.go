@@ -1,6 +1,9 @@
 package common
 
 import (
+	"encoding/csv"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -18,6 +21,7 @@ type ClientConfig struct {
 	ServerAddress string
 	LoopAmount    int
 	LoopPeriod    time.Duration
+	MaxAmount     int
 }
 
 // Client Entity that encapsulates how
@@ -55,66 +59,137 @@ func (c *Client) createClientSocket() error {
 	return nil
 }
 
-// StartClientLoop Send messages to the client until some time threshold is met
-// or a termination signal (SIGTERM) is received.
+// StartClientLoop reads the dataset and sends bets in batches to the server.
+// It respects both maximum batch size in bytes and maximum number of bets per batch.
 func (c *Client) StartClientLoop() {
-	bet := Bet{
-        Agency:    os.Getenv("CLI_ID"),
-        Name:      os.Getenv("NOMBRE"),
-        LastName:  os.Getenv("APELLIDO"),
-        ID:        os.Getenv("DOCUMENTO"),
-        BirthDate: os.Getenv("NACIMIENTO"),
-        Number:    os.Getenv("NUMERO"),
+	file, reader, err := c.openDataset()
+    if err != nil {
+        log.Errorf("action: open_dataset | result: fail | error: %v", err)
+        return
     }
-	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-		// Check for termination signal before starting a new connection
-		select {
-		case <-c.stop:
-			log.Infof("action: signal_received | result: in_progress | signal: SIGTERM")
-			if c.conn != nil {
-				c.conn.Close()
-				log.Infof("action: close_client_socket | result: success")
-			}
-			log.Infof("action: client_shutdown | result: success")
+    defer file.Close()
+
+	const maxBatchBytes = 8192
+	batch := make([]Bet, 0, c.config.MaxAmount)
+	currentBatchBytes := 0
+
+	for {
+		if c.isStopped() {
+			c.handleShutdown()
 			return
-		default:
 		}
 
-		// Create the connection the server in every loop iteration. Send an
-		err := c.createClientSocket()
+		record, err := reader.Read()
+        if err == io.EOF {
+            break // End of file reached
+        }
+		if err != nil {
+            log.Errorf("action: read_csv | result: fail | error: %v", err)
+            continue
+        }
+
+		bet := BetFromCSV(record, c.config.ID)
+        serializedBet := bet.Serialize()
+        betSize := len(serializedBet)
+
+		// Filter bets that exceed the maximum atomic transmission unit
+		if betSize > maxBatchBytes {
+            log.Errorf("action: filter_bet | result: fail | error: bet exceeds %v bytes", maxBatchBytes)
+            continue
+        }
+
+		// Check if adding the bet exceeds the byte limit or the count limit
+		if currentBatchBytes + betSize > maxBatchBytes || len(batch) >= c.config.MaxAmount {
+			log.Infof("action: send_batch | result: in_progress | client_id: %v", c.config.ID)
+            if err := c.sendBatchWithRetries(batch); err != nil { return }
+            batch = batch[:0]
+            currentBatchBytes = 0
+        }
+		
+		batch = append(batch, bet)
+        currentBatchBytes += betSize
+    }
+
+    // Send remaining records
+    if len(batch) > 0 {
+        c.sendBatchWithRetries(batch)
+    }
+	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+}
+
+// attempts to send a batch, retrying on connection errors
+// until success or a termination signal is received.
+func (c *Client) sendBatchWithRetries(bets []Bet) error {
+    for {
+		if c.isStopped() {
+			return fmt.Errorf("stop signal received")
+		}
+
+        err := c.createClientSocket()
         if err != nil {
             log.Errorf("action: connect | result: fail | error: %v", err)
             time.Sleep(c.config.LoopPeriod)
             continue
         }
 
-		payload := bet.Serialize()
-		if err := WriteFrame(c.conn, OpcodeBet, payload); err != nil {
-            log.Errorf("action: send_bet | result: fail | error: %v", err)
-            c.conn.Close()
-            return
-        }
-
-		frame, err := ReadFrame(c.conn)
-        if err != nil {
-            log.Errorf("action: receive_ack | result: fail | error: %v", err)
-        } else if frame.Opcode == OpcodeAck {
-            log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", bet.ID, bet.Number)
-        } else {
-            log.Errorf("action: receive_ack | result: fail | error: received_opcode_%v", frame.Opcode)
-        }
-
+        err = c.sendBatchData(bets)
         c.conn.Close()
 
-		// Wait between messages or interrupt immediately if a signal arrives
-		select {
-		case <-time.After(c.config.LoopPeriod):
-			// Period reached, continue to next iteration
-		case <-c.stop:
-			log.Infof("action: signal_received | result: in_progress | signal: SIGTERM")
-			log.Infof("action: client_shutdown | result: success")
-			return
-		}
+        if err == nil {
+            return nil
+        }
+        
+        log.Errorf("action: send_batch | result: fail | error: %v", err)
+        time.Sleep(c.config.LoopPeriod)
+    }
+}
+
+func (c *Client) sendBatchData(bets []Bet) error {
+	var payload []byte
+	for _, b := range bets {
+		payload = append(payload, b.Serialize()...)
 	}
-	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+	if err := WriteFrame(c.conn, OpcodeBatch, payload); err != nil {
+		return fmt.Errorf("error writing batch: %w", err)
+	}
+
+	frame, err := ReadFrame(c.conn)
+	if err != nil {
+		return fmt.Errorf("error reading server ACK: %w", err)
+	}
+	
+	if frame.Opcode != OpcodeAck {
+		return fmt.Errorf("unexpected response opcode: %v", frame.Opcode)
+	}
+
+	return nil
+}
+
+
+func (c *Client) openDataset() (*os.File, *csv.Reader, error) {
+    filePath := fmt.Sprintf("/data/agency-%s.csv", c.config.ID)
+    file, err := os.Open(filePath)
+    if err != nil {
+        return nil, nil, err
+    }
+    reader := csv.NewReader(file)
+    return file, reader, nil
+}
+
+func (c *Client) isStopped() bool {
+	select {
+	case <-c.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) handleShutdown() {
+	log.Infof("action: signal_received | result: in_progress | signal: SIGTERM")
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	log.Infof("action: client_shutdown | result: success")
 }
