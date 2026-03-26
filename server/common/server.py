@@ -7,6 +7,10 @@ from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCO
 from common.bet import BetDeserializer
 from common.utils import Bet, store_bets, load_bets, has_won
 
+BETS_FILE = "bets.csv"
+EXPECTED_BET_FIELDS = 6
+DEFAULT_AGENCIES = 5
+
 class Server:
     def __init__(self, port, listen_backlog):
         # Initialize server socket
@@ -21,14 +25,18 @@ class Server:
         }
 
         self._lock = threading.Lock()
-        self._total_agencies = int(os.getenv('CAN_AGENCIES', 5))
+        self._total_agencies = int(os.getenv('CAN_AGENCIES', DEFAULT_AGENCIES))
         self._agencies_finished = set()
         self._lottery_done = False
 
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
-        if os.path.exists("./bets.csv"):
-            os.remove("./bets.csv")
+        self.__cleanup_storage()
+
+    def __cleanup_storage(self):
+        """Removes the storage file if it exists."""
+        if os.path.exists(BETS_FILE):
+            os.remove(BETS_FILE)
 
     def __handle_signal(self, signum, frame):
         """
@@ -111,7 +119,7 @@ class Server:
                     return
                 fields, consumed = BetDeserializer.deserialize_single(body[offset:])
                 
-                if consumed == 0 or len(fields) != 6:
+                if consumed == 0 or len(fields) != EXPECTED_BET_FIELDS:
                     raise ValueError("Payload corrupto o incompleto")
                     
                 bets.append(Bet(*fields))
@@ -141,6 +149,16 @@ class Server:
         
         Protocol.send_frame(client_sock, OPCODE_ACK, b"")
 
+    def __get_agency_winners(self, agency_id):
+        """Logic to retrieve winning bets for a specific agency."""
+        with self._lock:
+            all_bets = load_bets()
+            agency_winners = [
+                bet.document for bet in all_bets
+                if bet.agency == agency_id and has_won(bet)
+            ]
+        return agency_winners
+
     def __handle_get_winners(self, client_sock, body):
         """
         Responds with the list of winning DNIs for the requesting agency.
@@ -155,18 +173,11 @@ class Server:
             return
         
         with self._lock:
-            lottery_ready = self._lottery_done
+            if not self._lottery_done:
+                Protocol.send_frame(client_sock, OPCODE_ERROR, b"Sorteo no realizado")
+                return
 
-        if not lottery_ready:
-            Protocol.send_frame(client_sock, OPCODE_ERROR, b"Sorteo no realizado")
-            return
-
-        with self._lock:
-            winners_dni = [
-                bet.document for bet in load_bets() 
-                if bet.agency == agency_id and has_won(bet)
-            ]
-        
+        winners_dni = self.__get_agency_winners(agency_id)
         response = ",".join(winners_dni).encode()
         Protocol.send_frame(client_sock, OPCODE_ACK, response)
 
