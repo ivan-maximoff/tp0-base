@@ -25,8 +25,21 @@ func WriteFrame(conn net.Conn, opcode byte, body []byte) error {
 	header := make([]byte, 5)
 	header[0] = opcode
 	binary.BigEndian.PutUint32(header[1:], uint32(len(body)))
-	_, err := conn.Write(append(header, body...))
-	return err
+	    data := append(header, body...)
+    totalSent := 0
+
+    for totalSent < len(data) {
+        n, err := conn.Write(data[totalSent:])
+        if err != nil {
+            return err
+        }
+        if n == 0 {
+            break
+        }
+        totalSent += n
+    }
+
+    return nil
 }
 
 // ReadFrame reads exactly 5 bytes for the header, then 'length' bytes for the body
