@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -115,6 +116,15 @@ func (c *Client) StartClientLoop() {
         c.sendBatchWithRetries(batch)
     }
 	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+	// Send end of data notification
+	if err := c.sendNotification(OpcodeEndData); err != nil {
+        log.Errorf("action: end_data | result: fail | error: %v", err)
+        return
+    }
+
+	// Wait for the lottery to finish
+    c.queryWinners()
 }
 
 // attempts to send a batch, retrying on connection errors
@@ -192,4 +202,52 @@ func (c *Client) handleShutdown() {
 		c.conn.Close()
 	}
 	log.Infof("action: client_shutdown | result: success")
+}
+
+func (c *Client) sendNotification(opcode byte) error {
+    if err := c.createClientSocket(); err != nil { return err }
+    defer c.conn.Close()
+
+    if err := WriteFrame(c.conn, opcode, []byte(c.config.ID)); err != nil { return err }
+    _, err := ReadFrame(c.conn)
+    return err
+}
+
+// Performs a polling mechanism to fetch winners once the lottery is done.
+func (c *Client) queryWinners() {
+    for {
+        if c.isStopped() { return }
+
+        if err := c.createClientSocket(); err != nil {
+            time.Sleep(c.config.LoopPeriod)
+            continue
+        }
+
+        err := WriteFrame(c.conn, OpcodeGetWinners, []byte(c.config.ID))
+        if err == nil {
+            frame, err_read := ReadFrame(c.conn)
+            if errRead == nil && frame.Opcode == OpcodeAck {
+				c.handleWinnersResponse(frame.Body)
+				c.conn.Close()
+				return
+			}
+        }
+        
+        c.conn.Close()
+        select {
+        case <-time.After(c.config.LoopPeriod): 
+            continue
+        case <-c.stop:
+            return
+        }
+    }
+}
+
+// Parses the winning DNIs and logs the final result.
+func (c *Client) handleWinnersResponse(data []byte) {
+	winners := []string{}
+	if len(data) > 0 {
+		winners = strings.Split(string(data), ",")
+	}
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", len(winners))
 }
