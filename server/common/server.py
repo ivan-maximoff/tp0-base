@@ -109,6 +109,10 @@ class Server:
                 if not self._running:
                     return
                 fields, consumed = BetDeserializer.deserialize_single(body[offset:])
+                
+                if consumed == 0 or len(fields) != 6:
+                    raise ValueError("Payload corrupto o incompleto")
+                    
                 bets.append(Bet(*fields))
                 offset += consumed
             
