@@ -62,18 +62,19 @@ class Server:
         client socket will also be closed
         """
         try:
-            res = Protocol.receive_frame(client_sock)
-            if not res:
-                return
+            while self._running:
+                res = Protocol.receive_frame(client_sock)
+                if not res:
+                    break  # Client closed connection
 
-            opcode, body = res
-            handler = self._handlers.get(opcode)
+                opcode, body = res
+                handler = self._handlers.get(opcode)
 
-            if handler:
-                handler(client_sock, body)
-            else:
-                logging.error(f"action: receive_frame | result: fail | error: unknown_opcode {opcode}")
-                Protocol.send_frame(client_sock, OPCODE_ERROR, b"Unknown Opcode")
+                if handler:
+                    handler(client_sock, body)
+                else:
+                    logging.error(f"action: receive_frame | result: fail | error: unknown_opcode {opcode}")
+                    Protocol.send_frame(client_sock, OPCODE_ERROR, b"Unknown Opcode")
 
         except Exception as e:
             logging.error(f"action: handle_client_connection | result: fail | error: {e}")
