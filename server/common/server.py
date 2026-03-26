@@ -1,6 +1,7 @@
 import socket
 import logging
 import signal
+import os
 from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH
 from common.bet import BetDeserializer
 from common.utils import Bet, store_bets
@@ -17,6 +18,8 @@ class Server:
         }
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
+        if os.path.exists("./bets.csv"):
+            os.remove("./bets.csv")
 
     def __handle_signal(self, signum, frame):
         """
