@@ -57,3 +57,11 @@ Se implementó la lógica para que los clientes lean los datos desde un archivo 
 ### Ejercicio 7: Sorteo y Consulta de Ganadores
 
 Para el sorteo, los clientes envían un mensaje de fin de datos (`OpcodeEndData`) al agotar sus registros. El servidor lleva la cuenta y, tras recibir la confirmación de las 5 agencias, habilita el sorteo. Posteriormente, los clientes consultan los resultados mediante un mecanismo de polling (`OpcodeGetWinners`). El servidor responde con la lista con los DNIs ganadores correspondientes únicamente a esa agencia.
+
+## Parte 2
+
+### Ejercicio 8: Concurrencia y Sincronización
+
+Se modificó el servidor para soportar múltiples conexiones simultáneas mediante el uso de hilos (multithreading). Se implementó un mecanismo de sincronización basado en un Mutex (`threading.Lock`) para garantizar la consistencia en el acceso a recursos compartidos:
+- **Persistencia Segura:** Las escrituras en el archivo de apuestas están protegidas para evitar corrupción de datos por condiciones de carrera.
+- **Estado Global:** El contador de agencias finalizadas y el estado del sorteo se manejan de forma atómica para asegurar que el sorteo se dispare exactamente una vez cuando se alcanza la barrera de sincronización.
