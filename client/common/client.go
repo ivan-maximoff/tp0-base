@@ -43,22 +43,44 @@ func NewClient(config ClientConfig) *Client {
 	return client
 }
 
-// CreateClientSocket Initializes client socket. In case of
-// failure, error is printed in stdout/stderr and exit 1
-// is returned
-func (c *Client) createClientSocket() error {
+// creates a socket if it doesn't exist. 
+// This allows for persistent connections across multiple frames.
+func (c *Client) ensureConnection() error {
+	if c.conn != nil {
+		return nil
+	}
 	conn, err := net.Dial("tcp", c.config.ServerAddress)
 	if err != nil {
-		log.Criticalf(
-			"action: connect | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
 		return err
 	}
 	c.conn = conn
 	return nil
 }
+
+// safely closes and nils the connection
+func (c *Client) closeConnection() {
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+}
+
+// // CreateClientSocket Initializes client socket. In case of
+// // failure, error is printed in stdout/stderr and exit 1
+// // is returned
+// func (c *Client) createClientSocket() error {
+// 	conn, err := net.Dial("tcp", c.config.ServerAddress)
+// 	if err != nil {
+// 		log.Criticalf(
+// 			"action: connect | result: fail | client_id: %v | error: %v",
+// 			c.config.ID,
+// 			err,
+// 		)
+// 		return err
+// 	}
+// 	c.conn = conn
+// 	return nil
+// }
 
 // StartClientLoop reads the dataset and sends bets in batches to the server.
 // It respects both maximum batch size in bytes and maximum number of bets per batch.
@@ -69,6 +91,10 @@ func (c *Client) StartClientLoop() {
         return
     }
     defer file.Close()
+
+	if err := c.ensureConnection(); err != nil {
+		log.Criticalf("action: connect | result: fail | error: %v", err)
+	}
 
 	const maxBatchBytes = 8192
 	batch := make([]Bet, 0, c.config.MaxAmount)
@@ -104,7 +130,8 @@ func (c *Client) StartClientLoop() {
         return
     }
 
-	// Wait for the lottery to finish
+	// Close connection and wait for the lottery to finish
+	c.closeConnection()
     c.queryWinners()
 }
 
@@ -158,6 +185,7 @@ func (c *Client) sendBatchWithRetries(bets []Bet) error {
         }
         
         log.Errorf("action: send_batch | result: fail | error: %v", err)
+		c.closeConnection() // Reset connection on error to retry handshake
         time.Sleep(c.config.LoopPeriod)
     }
 }
@@ -213,20 +241,29 @@ func (c *Client) handleShutdown() {
 }
 
 func (c *Client) sendNotification(opcode byte) error {
-    if err := c.createClientSocket(); err != nil { return err }
-    defer c.conn.Close()
+    if err := c.ensureConnection(); err != nil {
+		return err
+	}
 
-    if err := WriteFrame(c.conn, opcode, []byte(c.config.ID)); err != nil { return err }
+    if err := WriteFrame(c.conn, opcode, []byte(c.config.ID)); err != nil {
+		c.closeConnection()
+		return err
+	}
+
     _, err := ReadFrame(c.conn)
+	if err != nil {
+		c.closeConnection()
+	}
     return err
 }
 
 // Performs a polling mechanism to fetch winners once the lottery is done.
+// We open/close to avoid keeping the connection open unnecessarily.
 func (c *Client) queryWinners() {
     for {
         if c.isStopped() { return }
 
-        if err := c.createClientSocket(); err != nil {
+        if err := c.ensureConnection(); err != nil {
             time.Sleep(c.config.LoopPeriod)
             continue
         }
@@ -240,8 +277,8 @@ func (c *Client) queryWinners() {
 				return
 			}
         }
-        
-        c.conn.Close()
+
+        c.closeConnection()
         select {
         case <-time.After(c.config.LoopPeriod): 
             continue
