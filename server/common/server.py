@@ -2,6 +2,7 @@ import socket
 import logging
 import signal
 import os
+import threading
 from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH, OPCODE_END_DATA, OPCODE_GET_WINNERS
 from common.bet import BetDeserializer
 from common.utils import Bet, store_bets, load_bets, has_won
@@ -18,6 +19,8 @@ class Server:
             OPCODE_END_DATA: self.__handle_end_data,
             OPCODE_GET_WINNERS: self.__handle_get_winners
         }
+
+        self._lock = threading.Lock()
         self._total_agencies = int(os.getenv('CAN_AGENCIES', 5))
         self._agencies_finished = set()
         self._lottery_done = False
@@ -37,18 +40,13 @@ class Server:
 
     def run(self):
         """
-        Dummy Server loop
-
-        Server that accept a new connections and establishes a
-        communication with a client. After client with communucation
-        finishes, servers starts to accept new connections again.
-
-        The loop terminates gracefully if self._running is set to False via SIGTERM.
+        Main server loop that accepts connections and spawns threads.
         """
         while self._running:
             try:
                 client_sock = self.__accept_new_connection()
-                self.__handle_client_connection(client_sock)
+                thread = threading.Thread(target=self.__handle_client_connection, args=(client_sock,))
+                thread.start()
             except OSError:
                 if not self._running:
                     logging.info('action: server_shutdown | result: success')
@@ -93,7 +91,7 @@ class Server:
                 number=fields[5]
             )
 
-            store_bets([bet])
+            self.__safe_store_bets([bet])
             logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
             Protocol.send_frame(client_sock, OPCODE_ACK, b"")
 
@@ -112,7 +110,7 @@ class Server:
                 bets.append(Bet(*fields))
                 offset += consumed
             
-            store_bets(bets)
+            self.__safe_store_bets(bets)
             logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
             Protocol.send_frame(client_sock, OPCODE_ACK, b"")
             
@@ -126,12 +124,13 @@ class Server:
         Triggers the lottery if the required number of agencies have finished.
         """
 
-        agency_id = body.decode()
-        self._agencies_finished.add(agency_id)
+        with self._lock:
+            agency_id = body.decode()
+            self._agencies_finished.add(agency_id)
 
-        if len(self._agencies_finished) >= self._total_agencies and not self._lottery_done:
-            logging.info("action: sorteo | result: success")
-            self._lottery_done = True
+            if len(self._agencies_finished) >= self._total_agencies and not self._lottery_done:
+                logging.info("action: sorteo | result: success")
+                self._lottery_done = True
         
         Protocol.send_frame(client_sock, OPCODE_ACK, b"")
 
@@ -148,15 +147,18 @@ class Server:
             Protocol.send_frame(client_sock, OPCODE_ERROR, b"ID invalido")
             return
         
-        if not self._lottery_done:
+        with self._lock:
+            lottery_ready = self._lottery_done
+
+        if not lottery_ready:
             Protocol.send_frame(client_sock, OPCODE_ERROR, b"Sorteo no realizado")
             return
 
-        all_bets = load_bets()
-        winners_dni = []
-        for bet in all_bets:
-            if bet.agency == agency_id and has_won(bet):
-                winners_dni.append(bet.document)
+        with self._lock:
+            winners_dni = [
+                bet.document for bet in load_bets() 
+                if bet.agency == agency_id and has_won(bet)
+            ]
         
         response = ",".join(winners_dni).encode()
         Protocol.send_frame(client_sock, OPCODE_ACK, response)
@@ -174,3 +176,10 @@ class Server:
         c, addr = self._server_socket.accept()
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
+
+    def __safe_store_bets(self, bets):
+        """
+        Safely store bets in the database.
+        """
+        with self._lock:
+            store_bets(bets)
