@@ -225,7 +225,7 @@ func (c *Client) queryWinners() {
 
         err := WriteFrame(c.conn, OpcodeGetWinners, []byte(c.config.ID))
         if err == nil {
-            frame, err_read := ReadFrame(c.conn)
+            frame, errRead := ReadFrame(c.conn)
             if errRead == nil && frame.Opcode == OpcodeAck {
 				c.handleWinnersResponse(frame.Body)
 				c.conn.Close()
