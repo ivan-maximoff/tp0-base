@@ -10,6 +10,7 @@ const (
 	OpcodeBet   byte = 0x01
 	OpcodeAck   byte = 0x02
 	OpcodeError byte = 0x03
+	OpcodeBatch byte = 0x04
 )
 
 type Frame struct {

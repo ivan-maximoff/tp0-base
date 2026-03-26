@@ -3,6 +3,7 @@ import struct
 OPCODE_BET = 0x01
 OPCODE_ACK = 0x02
 OPCODE_ERROR = 0x03
+OPCODE_BATCH = 0x04
 
 class Protocol:
     @staticmethod
