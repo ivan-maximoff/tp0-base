@@ -11,6 +11,8 @@ const (
 	OpcodeAck   byte = 0x02
 	OpcodeError byte = 0x03
 	OpcodeBatch byte = 0x04
+	OpcodeEndData    byte = 0x05
+    OpcodeGetWinners byte = 0x06
 )
 
 type Frame struct {

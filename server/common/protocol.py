@@ -4,6 +4,8 @@ OPCODE_BET = 0x01
 OPCODE_ACK = 0x02
 OPCODE_ERROR = 0x03
 OPCODE_BATCH = 0x04
+OPCODE_END_DATA = 0x05
+OPCODE_GET_WINNERS = 0x06
 
 class Protocol:
     @staticmethod
