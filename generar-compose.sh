@@ -47,6 +47,7 @@ for i in $(seq 1 "$CANTIDAD"); do
       - server
     volumes:
       - ./client/config.yaml:/config.yaml
+      - ./.data:/data
 EOF
 done
 
