@@ -44,7 +44,16 @@ Se implementó un protocolo binario basado en frames
 
 2. **Tipos de Mensajes (Opcodes):**
    - 0x01: Mensaje de Apuesta (Bet).
-   - 0x02: Fin de transmisión de Agencia.
-   - 0x03: Consulta de Ganadores.
-   - 0x04: Confirmación (ACK).
-   - 0x05: Error.
+   - 0x02: Confirmation (ACK).
+   - 0x03: Error.
+   - 0x04: Envío de múltiples apuestas serializadas en un único frame (Batch).
+   - 0x05: End of Agency Data.
+   - 0x06: Winners Query.
+
+### Ejercicio 5 y 6: Procesamiento de Apuestas por Batch
+
+Se implementó la lógica para que los clientes lean los datos desde un archivo `.csv` (montado en los contenedores mediante volúmenes) y envíen las apuestas al servidor. Para optimizar la comunicación, las apuestas se agrupan en _batches_, limitando el tamaño del paquete a un máximo de 8kB y a un `maxAmount` configurable. En el servidor se recibe este batch, se deserializan los registros y se persisten usando `store_bets`. También se manejaron adecuadamente los _short reads_ en la capa de red garantizando la correcta lectura de tamaños de frame dinámicos.
+
+### Ejercicio 7: Sorteo y Consulta de Ganadores
+
+Para el sorteo, los clientes envían un mensaje de fin de datos (`OpcodeEndData`) al agotar sus registros. El servidor lleva la cuenta y, tras recibir la confirmación de las 5 agencias, habilita el sorteo. Posteriormente, los clientes consultan los resultados mediante un mecanismo de polling (`OpcodeGetWinners`). El servidor responde con la lista con los DNIs ganadores correspondientes únicamente a esa agencia.
