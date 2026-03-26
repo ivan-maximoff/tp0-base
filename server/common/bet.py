@@ -2,9 +2,10 @@ import struct
 
 class BetDeserializer:
     @staticmethod
-    def deserialize(data):
-        """ 
-        Reconstructs fields from bytes using length prefixes.
+    def deserialize_single(data):
+        """
+        Reconstructs fields from a single bet using length prefixes.
+        Returns: (list of fields, bytes_consumed)
         Expected order: Agency, Name, LastName, DNI, Birth, Number
         """
         fields = []
@@ -23,4 +24,9 @@ class BetDeserializer:
             fields.append(field_val)
             offset += field_len
             
+        return fields, offset
+    
+    @staticmethod
+    def deserialize(data):
+        fields, _ = BetDeserializer.deserialize_single(data)
         return fields

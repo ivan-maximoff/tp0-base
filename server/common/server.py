@@ -1,7 +1,7 @@
 import socket
 import logging
 import signal
-from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR
+from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH
 from common.bet import BetDeserializer
 from common.utils import Bet, store_bets
 
@@ -12,7 +12,8 @@ class Server:
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
         self._handlers = {
-            OPCODE_BET: self.__handle_bet_message
+            OPCODE_BET: self.__handle_bet_message,
+            OPCODE_BATCH: self.__handle_batch_message
         }
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
@@ -92,6 +93,25 @@ class Server:
         except Exception as e:
             logging.error(f"action: process_bet | result: fail | error: {e}")
             Protocol.send_frame(client_sock, OPCODE_ERROR, str(e).encode())
+
+    def __handle_batch_message(self, client_sock, body):
+        bets = []
+        offset = 0
+        try:
+            while offset < len(body):
+                if not self._running:
+                    return
+                fields, consumed = BetDeserializer.deserialize_single(body[offset:])
+                bets.append(Bet(*fields))
+                offset += consumed
+            
+            store_bets(bets)
+            logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
+            Protocol.send_frame(client_sock, OPCODE_ACK, b"")
+            
+        except Exception as e:
+            logging.error(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
+            Protocol.send_frame(client_sock, OPCODE_ERROR, b"")
 
     def __accept_new_connection(self):
         """
