@@ -1,9 +1,9 @@
 import socket
 import logging
 import signal
-from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH
+from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH, OPCODE_END_DATA, OPCODE_GET_WINNERS
 from common.bet import BetDeserializer
-from common.utils import Bet, store_bets
+from common.utils import Bet, store_bets, load_bets, has_won
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -13,8 +13,13 @@ class Server:
         self._server_socket.listen(listen_backlog)
         self._handlers = {
             OPCODE_BET: self.__handle_bet_message,
-            OPCODE_BATCH: self.__handle_batch_message
+            OPCODE_BATCH: self.__handle_batch_message,
+            OPCODE_END_DATA: self.__handle_end_data,
+            OPCODE_GET_WINNERS: self.__handle_get_winners
         }
+        self._agencies_finished = set()
+        self._lottery_done = False
+
         self._running = True
         signal.signal(signal.SIGTERM, self.__handle_signal)
 
@@ -112,6 +117,48 @@ class Server:
         except Exception as e:
             logging.error(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
             Protocol.send_frame(client_sock, OPCODE_ERROR, b"")
+
+    def __handle_end_data(self, client_sock, body):
+        """
+        Handles the end of data notification from an agency.
+        Triggers the lottery if the required number of agencies have finished.
+        """
+        
+        agency_id = body.decode()
+        self._agencies_finished.add(agency_id)
+
+        total_agencies = 5
+        if len(self._agencies_finished) == total_agencies and not self._lottery_done:
+            logging.info("action: sorteo | result: success")
+            self._lottery_done = True
+        
+        Protocol.send_frame(client_sock, OPCODE_ACK, b"")
+
+    def __handle_get_winners(self, client_sock, body):
+        """
+        Responds with the list of winning DNIs for the requesting agency.
+        Only allowed after the lottery has been performed.
+        """
+
+        try:
+            agency_id = int(body.decode())
+        except ValueError:
+            logging.error(f"Invalid agency id: {body.decode()}")
+            Protocol.send_frame(client_sock, OPCODE_ERROR, b"ID invalido")
+            return
+        
+        if not self._lottery_done:
+            Protocol.send_frame(client_sock, OPCODE_ERROR, b"Sorteo no realizado")
+            return
+
+        all_bets = load_bets()
+        winners_dni = []
+        for bet in all_bets:
+            if bet.agency == agency_id and has_won(bet):
+                winners_dni.append(bet.document)
+        
+        response = ",".join(winners_dni).encode()
+        Protocol.send_frame(client_sock, OPCODE_ACK, response)
 
     def __accept_new_connection(self):
         """
