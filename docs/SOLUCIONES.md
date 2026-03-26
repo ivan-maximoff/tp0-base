@@ -68,3 +68,9 @@ Se modificó el servidor para soportar múltiples conexiones simultáneas median
 
 - **Persistencia Segura:** Las escrituras en el archivo de apuestas están protegidas para evitar corrupción de datos por condiciones de carrera.
 - **Estado Global:** El contador de agencias finalizadas y el estado del sorteo se manejan de forma atómica para asegurar que el sorteo se dispare exactamente una vez cuando se alcanza la barrera de sincronización.
+
+Además, se incluyeron algunas mejoras adicionales en esta rama que no se ven en las anteriores:
+
+- **Persistencia de conexión:** Hice que se mantenga viva la conexión al momento de mandar batches, así no se interrumpe la conexión entre mensajes.
+- **Modularización:** Se modularizaron varias funciones para dejar el código más ordenado.
+- **Uso de constantes:** Se reemplazaron magic numbers y valores hardcodeados por constantes.
