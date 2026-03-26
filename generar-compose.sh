@@ -17,6 +17,7 @@ services:
     image: server:latest
     entrypoint: python3 /main.py
     environment:
+      - CAN_AGENCIES=$CANTIDAD
       - PYTHONUNBUFFERED=1
     networks:
       - testing_net

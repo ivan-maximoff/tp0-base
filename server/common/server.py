@@ -1,6 +1,7 @@
 import socket
 import logging
 import signal
+import os
 from common.protocol import Protocol, OPCODE_BET, OPCODE_ACK, OPCODE_ERROR, OPCODE_BATCH, OPCODE_END_DATA, OPCODE_GET_WINNERS
 from common.bet import BetDeserializer
 from common.utils import Bet, store_bets, load_bets, has_won
@@ -17,6 +18,7 @@ class Server:
             OPCODE_END_DATA: self.__handle_end_data,
             OPCODE_GET_WINNERS: self.__handle_get_winners
         }
+        self._total_agencies = int(os.getenv('CAN_AGENCIES', 5))
         self._agencies_finished = set()
         self._lottery_done = False
 
@@ -123,12 +125,11 @@ class Server:
         Handles the end of data notification from an agency.
         Triggers the lottery if the required number of agencies have finished.
         """
-        
+
         agency_id = body.decode()
         self._agencies_finished.add(agency_id)
 
-        total_agencies = 5
-        if len(self._agencies_finished) == total_agencies and not self._lottery_done:
+        if len(self._agencies_finished) >= self._total_agencies and not self._lottery_done:
             logging.info("action: sorteo | result: success")
             self._lottery_done = True
         
