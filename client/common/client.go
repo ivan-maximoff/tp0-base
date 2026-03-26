@@ -89,26 +89,7 @@ func (c *Client) StartClientLoop() {
             continue
         }
 
-		bet := BetFromCSV(record, c.config.ID)
-        serializedBet := bet.Serialize()
-        betSize := len(serializedBet)
-
-		// Filter bets that exceed the maximum atomic transmission unit
-		if betSize > maxBatchBytes {
-            log.Errorf("action: filter_bet | result: fail | error: bet exceeds %v bytes", maxBatchBytes)
-            continue
-        }
-
-		// Check if adding the bet exceeds the byte limit or the count limit
-		if currentBatchBytes + betSize > maxBatchBytes || len(batch) >= c.config.MaxAmount {
-			log.Infof("action: send_batch | result: in_progress | client_id: %v", c.config.ID)
-            if err := c.sendBatchWithRetries(batch); err != nil { return }
-            batch = batch[:0]
-            currentBatchBytes = 0
-        }
-		
-		batch = append(batch, bet)
-        currentBatchBytes += betSize
+		batch, currentBatchBytes = c.processRecordAndBatch(record, batch, currentBatchBytes, maxBatchBytes)
     }
 
     // Send remaining records
@@ -125,6 +106,33 @@ func (c *Client) StartClientLoop() {
 
 	// Wait for the lottery to finish
     c.queryWinners()
+}
+
+func (c *Client) processRecordAndBatch(record []string, batch []Bet, currentBatchBytes int, maxBatchBytes int) ([]Bet, int) {
+	bet := BetFromCSV(record, c.config.ID)
+	serializedBet := bet.Serialize()
+	betSize := len(serializedBet)
+
+	// Filter bets that exceed the maximum atomic transmission unit
+	if betSize > maxBatchBytes {
+		log.Errorf("action: filter_bet | result: fail | error: bet exceeds %v bytes", maxBatchBytes)
+		return batch, currentBatchBytes
+	}
+
+	// Check if adding the bet exceeds the byte limit or the count limit
+	if currentBatchBytes + betSize > maxBatchBytes || len(batch) >= c.config.MaxAmount {
+		log.Infof("action: send_batch | result: in_progress | client_id: %v", c.config.ID)
+		if err := c.sendBatchWithRetries(batch); err != nil { 
+			// Stop accumulating if retry failed (e.g. stopped)
+			return batch[:0], 0
+		}
+		batch = batch[:0]
+		currentBatchBytes = 0
+	}
+	
+	batch = append(batch, bet)
+	currentBatchBytes += betSize
+	return batch, currentBatchBytes
 }
 
 // attempts to send a batch, retrying on connection errors
